@@ -96,7 +96,7 @@ app.get("/timewall-postback", async (req, res) => {
   const tipo = req.query.type;
   const currencyAmount = req.query.currencyAmount;
   
-  // Validação
+  //Validação
   if (!userID || !revenue || !transactionID || !hashRecebido || !tipo || !currencyAmount || isNaN(parseFloat(revenue)) || isNaN(parseFloat(currencyAmount))) {
     console.error("❌ TimeWall: Parâmetros em falta ou inválidos.", req.query);
     return res.status(400).send("Missing or invalid parameters");
