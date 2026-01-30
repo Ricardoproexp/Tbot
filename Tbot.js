@@ -3,6 +3,7 @@
 // =====================
 const express = require("express");
 const crypto = require("crypto");
+const { Telegraf } = require("telegraf");
 
 // =====================
 // Configuração das Variáveis de Ambiente
@@ -25,30 +26,25 @@ async function iniciarTelegram() {
     }
     
     try {
-        const { Telegraf } = require("telegraf");
-        botTelegram = new Telegraf(TELEGRAM_TOKEN);
-        
-        // Configurar polling com parâmetros para evitar conflitos
-        const pollingConfig = {
-            dropPendingUpdates: true, // Ignorar atualizações pendentes
-            allowedUpdates: [], // Não receber nenhuma atualização (só enviamos mensagens)
-            polling: {
-                timeout: 30,
-                limit: 1,
-                allowedUpdates: []
+        // Criar instância do bot sem polling
+        botTelegram = new Telegraf(TELEGRAM_TOKEN, {
+            telegram: { 
+                apiRoot: 'https://api.telegram.org',
+                agent: null,
+                attachmentAgent: null
             }
-        };
+        });
         
-        // Iniciar o bot sem polling (só para enviar mensagens)
-        await botTelegram.telegram.getMe(); // Testar conexão
-        console.log(`🤖 Bot Telegram conectado como ${botTelegram.botInfo?.username || 'bot'}`);
+        // Usar apenas a API direta, sem polling
+        await botTelegram.telegram.getMe();
+        console.log(`🤖 Bot Telegram conectado como ${(await botTelegram.telegram.getMe()).username}`);
         telegramConnected = true;
         
+        // NÃO INICIAR POLLING - isso causa conflitos com webhooks/postbacks
+        console.log("✅ Telegram configurado apenas para envio (sem polling)");
+        
     } catch (error) {
-        console.error(`❌ Erro ao conectar bot Telegram: ${error.message}`);
-        if (error.response && error.response.description) {
-            console.error(`📋 Detalhes: ${error.response.description}`);
-        }
+        console.error(`❌ Erro ao conectar bot Telegram:`, error.message);
         
         // Tentar reconectar após 10 segundos
         setTimeout(() => {
@@ -66,10 +62,21 @@ async function iniciarTelegram() {
 // ===============================
 const app = express();
 
+// Middleware para logs
+app.use((req, res, next) => {
+    console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
+    next();
+});
+
 // Middleware básico
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
+// =====================
+// ENDPOINTS
+// =====================
+
+// Endpoint principal - status
 app.get("/", (req, res) => {
   res.status(200).send(`
     <html>
@@ -80,15 +87,34 @@ app.get("/", (req, res) => {
         <p>Status: <strong>${telegramConnected ? '✅ Telegram Conectado' : '⚠️ Telegram Não Conectado'}</strong></p>
         <p>Endpoint: <code>/timewall-postback</code></p>
         <p>Grupo Telegram: <code>${TELEGRAM_GROUP_ID || 'Não configurado'}</code></p>
+        <p>TimeWall Secret: <code>${TIMEWALL ? 'Configurado' : 'Não configurado'}</code></p>
+        <hr>
+        <p><strong>Testar conexão:</strong> Acesse <code>/health</code> para verificar status completo</p>
       </body>
     </html>
   `);
 });
 
+// Health check endpoint
+app.get("/health", (req, res) => {
+    const health = {
+        status: "online",
+        timestamp: new Date().toISOString(),
+        telegram: telegramConnected ? "connected" : "disconnected",
+        timewall: TIMEWALL ? "configured" : "not configured",
+        telegram_group: TELEGRAM_GROUP_ID || "not configured",
+        server_port: PORT
+    };
+    res.status(200).json(health);
+});
+
+// =====================
+// ENDPOINT TIMEWALL POSTBACK (PRINCIPAL)
+// =====================
 app.get("/timewall-postback", async (req, res) => {
-  console.log("🔔 TimeWall postback recebido:", req.query);
+  console.log("🔔 TimeWall postback recebido:", JSON.stringify(req.query));
   
-  // Lógica de extração de parâmetros
+  // Lógica de extração de parâmetros - IDENTICA AO CÓDIGO DO DISCORD
   const userID = req.query.userid || req.query.userID || req.query.userId;
   const revenue = req.query.revenue;
   const transactionID = req.query.transactionid || req.query.transactionID || req.query.transactionId;
@@ -96,17 +122,47 @@ app.get("/timewall-postback", async (req, res) => {
   const tipo = req.query.type;
   const currencyAmount = req.query.currencyAmount;
   
-  //Validação
-  if (!userID || !revenue || !transactionID || !hashRecebido || !tipo || !currencyAmount || isNaN(parseFloat(revenue)) || isNaN(parseFloat(currencyAmount))) {
-    console.error("❌ TimeWall: Parâmetros em falta ou inválidos.", req.query);
+  // VALIDAÇÃO IDÊNTICA AO CÓDIGO DO DISCORD
+  if (!userID) {
+    console.error("❌ userID em falta");
+    return res.status(400).send("Missing or invalid parameters");
+  }
+  
+  if (!revenue || isNaN(parseFloat(revenue))) {
+    console.error("❌ revenue inválido:", revenue);
+    return res.status(400).send("Missing or invalid parameters");
+  }
+  
+  if (!transactionID) {
+    console.error("❌ transactionID em falta");
+    return res.status(400).send("Missing or invalid parameters");
+  }
+  
+  if (!hashRecebido) {
+    console.error("❌ hash em falta");
+    return res.status(400).send("Missing or invalid parameters");
+  }
+  
+  if (!tipo) {
+    console.error("❌ type em falta");
+    return res.status(400).send("Missing or invalid parameters");
+  }
+  
+  if (!currencyAmount || isNaN(parseFloat(currencyAmount))) {
+    console.error("❌ currencyAmount inválido:", currencyAmount);
     return res.status(400).send("Missing or invalid parameters");
   }
 
+  // Verificar hash - EXATAMENTE IGUAL AO DISCORD
   const revenueUSD = parseFloat(revenue);
-  const hashEsperada = crypto.createHash("sha256").update(userID + revenueUSD + TIMEWALL).digest("hex");
- 
+  const hashString = userID + revenueUSD + TIMEWALL;
+  const hashEsperada = crypto.createHash("sha256").update(hashString).digest("hex");
+  
+  console.log(`🔑 Hash calculada: ${hashEsperada}`);
+  console.log(`🔑 Hash recebida: ${hashRecebido}`);
+  
   if (hashRecebido !== hashEsperada) {
-    console.error("⛔ TimeWall hash inválida.");
+    console.error("⛔ TimeWall hash inválida. Esperada:", hashEsperada, "Recebida:", hashRecebido);
     return res.status(403).send("Invalid hash");
   }
 
@@ -119,31 +175,38 @@ app.get("/timewall-postback", async (req, res) => {
       await iniciarTelegram();
       
       if (!telegramConnected) {
+        console.error("❌ Telegram ainda não conectado após tentativa");
         return res.status(503).send("Telegram service unavailable");
       }
     }
     
-    // DETECTAR PLATAFORMA PELO userID
-    if (userID.startsWith('telegram_')) {
-      // ✅ PROCESSAR PARA TELEGRAM
-      await processarParaTelegram(userID, tipo, usd, transactionID);
-      return res.status(200).send("1");
-      
-    } else {
-      // 🔄 FALLBACK: Assumir Telegram
-      console.warn(`⚠️ userID sem prefixo: ${userID}, assumindo Telegram`);
-      await processarParaTelegram(`telegram_${userID}`, tipo, usd, transactionID);
-      return res.status(200).send("1");
-    }
+    // Processar para Telegram - MENSAGEM SIMPLES COMO NO DISCORD
+    const userIdLimpo = userID.replace("discord_", "").replace("telegram_", "");
+    const tipoTarefa = (tipo === 'chargeback') ? 'CHARGEBACK' : 'CREDIT';
+    const mensagemTelegram = `${tipoTarefa}:${userIdLimpo}:${usd}`;
+    
+    console.log(`📤 Enviando para Telegram: ${mensagemTelegram}`);
+    
+    // Usar método direto do Telegram API
+    await botTelegram.telegram.sendMessage(
+        TELEGRAM_GROUP_ID,
+        mensagemTelegram
+    );
+    
+    console.log(`✅ Postback processado com sucesso: ${mensagemTelegram}`);
+    return res.status(200).send("1");
 
   } catch (err) {
     console.error("❌ Erro crítico ao processar postback:", err);
+    console.error("Stack trace:", err.stack);
     
-    // Se erro for de conexão Telegram, tentar reconectar
-    if (err.message.includes('Telegram') || err.message.includes('409')) {
-      telegramConnected = false;
-      console.log("🔄 Reconectando ao Telegram devido a erro...");
-      setTimeout(iniciarTelegram, 5000);
+    // Se erro for de conexão Telegram
+    if (err.message.includes('409') || err.message.includes('Conflict')) {
+        console.log("🔄 Detetado conflito (409), resetando conexão Telegram...");
+        telegramConnected = false;
+        botTelegram = null;
+        setTimeout(iniciarTelegram, 3000);
+        return res.status(503).send("Telegram conflict, reconnecting");
     }
     
     return res.status(500).send("Internal Server Error");
@@ -151,99 +214,71 @@ app.get("/timewall-postback", async (req, res) => {
 });
 
 // =====================
-// FUNÇÃO PARA TELEGRAM - MENSAGEM SIMPLES
+// Endpoint de teste (apenas para debug)
 // =====================
-async function processarParaTelegram(userID, tipo, usd, transactionID) {
-    if (!botTelegram || !TELEGRAM_GROUP_ID || !telegramConnected) {
-        throw new Error("Telegram não configurado ou desconectado");
+app.get("/test-postback", async (req, res) => {
+    if (!telegramConnected) {
+        return res.status(503).send("Telegram not connected");
     }
-    
-    const userIdLimpo = userID.replace("telegram_", "");
-    const tipoTarefa = (tipo === 'chargeback') ? 'CHARGEBACK' : 'CREDIT';
     
     try {
-        // MENSAGEM SIMPLES - IGUAL AO DISCORD
-        const mensagemTelegram = `${tipoTarefa}:${userIdLimpo}:${usd}`;
-        
-        // Usar método direto do Telegram API para evitar conflitos
-        const response = await botTelegram.telegram.sendMessage(
-            TELEGRAM_GROUP_ID,
-            mensagemTelegram
-        );
-        
-        console.log(`✅ Tarefa Telegram enviada: ${mensagemTelegram}`);
-        console.log(`📨 Message ID: ${response.message_id}`);
-        
-        return response;
-        
+        const testMessage = `TEST:${Date.now()}:1.50`;
+        await botTelegram.telegram.sendMessage(TELEGRAM_GROUP_ID, testMessage);
+        res.status(200).send(`Test message sent: ${testMessage}`);
     } catch (error) {
-        console.error(`❌ Erro ao enviar mensagem para Telegram: ${error.message}`);
-        
-        // Se for erro de conflito (409), resetar conexão
-        if (error.message.includes('409') || error.message.includes('Conflict')) {
-            console.log("🔄 Detetado conflito, resetando conexão Telegram...");
-            telegramConnected = false;
-            botTelegram = null;
-            
-            // Tentar reconectar
-            setTimeout(iniciarTelegram, 3000);
-        }
-        
-        throw error;
+        res.status(500).send(`Error: ${error.message}`);
     }
-}
+});
 
 // =====================
 // Início do Servidor
 // =====================
 async function iniciarServidor() {
-    // Iniciar Telegram primeiro
+    // Iniciar Telegram primeiro (sem polling)
+    console.log("🔧 Iniciando configuração do Telegram...");
     await iniciarTelegram();
     
     // Iniciar servidor HTTP
-    app.listen(PORT, () => {
+    app.listen(PORT, '0.0.0.0', () => {
         console.log(`🚀 Servidor de Postbacks TimeWall/Telegram está online na porta ${PORT}`);
         console.log(`🌐 Endpoint principal: /timewall-postback`);
-        console.log(`🔗 URL: http://localhost:${PORT}/timewall-postback`);
-        console.log(`🌍 URL Pública: https://tbot-84o7.onrender.com`);
+        console.log(`🔗 URL Local: http://localhost:${PORT}`);
+        console.log(`🔧 Ambiente: ${process.env.NODE_ENV || 'development'}`);
         
         if (telegramConnected) {
-            console.log(`✅ Telegram configurado para grupo: ${TELEGRAM_GROUP_ID}`);
+            console.log(`✅ Telegram conectado para grupo: ${TELEGRAM_GROUP_ID}`);
         } else {
-            console.warn(`⚠️ Telegram não conectado. Verifique as configurações.`);
+            console.warn(`⚠️ Telegram não conectado. Postbacks não serão enviados.`);
+        }
+        
+        if (!TIMEWALL) {
+            console.error("❌ AVISO: TIMEWALL secret não configurada!");
         }
     });
 }
 
 // Iniciar tudo
 iniciarServidor().catch(error => {
-    console.error("❌ Erro ao iniciar servidor:", error);
+    console.error("❌ Erro fatal ao iniciar servidor:", error);
     process.exit(1);
 });
 
 // Graceful shutdown
-process.once('SIGINT', () => {
-    console.log('🛑 Desligando graciosamente...');
-    if (botTelegram) {
-        try {
-            botTelegram.stop('SIGINT');
-        } catch (e) {
-            // Ignorar erros ao parar
+['SIGINT', 'SIGTERM', 'SIGUSR2'].forEach(signal => {
+    process.once(signal, () => {
+        console.log(`🛑 Recebido ${signal}, desligando graciosamente...`);
+        if (botTelegram) {
+            try {
+                botTelegram.stop(signal);
+            } catch (e) {
+                console.log("⚠️ Erro ao parar bot Telegram:", e.message);
+            }
         }
-    }
-    process.exit(0);
-});
-
-process.once('SIGTERM', () => {
-    console.log('🛑 Terminando graciosamente...');
-    if (botTelegram) {
-        try {
-            botTelegram.stop('SIGTERM');
-        } catch (e) {
-            // Ignorar erros ao parar
-        }
-    }
-    process.exit(0);
+        setTimeout(() => {
+            console.log("👋 Servidor terminado");
+            process.exit(0);
+        }, 100);
+    });
 });
 
 // Manter a aplicação viva
@@ -254,3 +289,6 @@ process.on('uncaughtException', (error) => {
 process.on('unhandledRejection', (reason, promise) => {
     console.error('🚨 Promessa rejeitada não tratada:', reason);
 });
+
+// Log de inicialização
+console.log("🔄 Iniciando servidor de postbacks TimeWall para Telegram...");
