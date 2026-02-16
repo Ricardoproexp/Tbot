@@ -121,7 +121,8 @@ app.get("/timewall-postback", async (req, res) => {
   const hashRecebido = req.query.hash;
   const tipo = req.query.type;
   const currencyAmount = req.query.currencyAmount;
-  
+  const withdrawid = req.query.withdrawid;
+    
   // VALIDAÇÃO IDÊNTICA AO CÓDIGO DO DISCORD
   if (!userID) {
     console.error("❌ userID em falta");
@@ -150,6 +151,11 @@ app.get("/timewall-postback", async (req, res) => {
   
   if (!currencyAmount || isNaN(parseFloat(currencyAmount))) {
     console.error("❌ currencyAmount inválido:", currencyAmount);
+    return res.status(400).send("Missing or invalid parameters");
+  }
+
+  if (!withdrawid) {
+    console.error("❌ withdrawid em falta");
     return res.status(400).send("Missing or invalid parameters");
   }
 
@@ -183,7 +189,7 @@ app.get("/timewall-postback", async (req, res) => {
     // Processar para Telegram - MENSAGEM SIMPLES COMO NO DISCORD
     const userIdLimpo = userID.replace("Telegram_", "");
     const tipoTarefa = (tipo === 'chargeback') ? 'CHARGEBACK' : 'CREDIT';
-    const mensagemTelegram = `${tipoTarefa}:${userIdLimpo}:${usd}`;
+    const mensagemTelegram = `${tipoTarefa}:${userIdLimpo}:${usd}:${withdrawid}`;
     
     console.log(`📤 Enviando para Telegram: ${mensagemTelegram}`);
     
