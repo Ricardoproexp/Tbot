@@ -181,7 +181,7 @@ app.get("/timewall-postback", async (req, res) => {
     }
     
     // Processar para Telegram - MENSAGEM SIMPLES COMO NO DISCORD
-    const userIdLimpo = userID.replace("discord_", "").replace("telegram_", "");
+    const userIdLimpo = userID.replace("Telegram_", "");
     const tipoTarefa = (tipo === 'chargeback') ? 'CHARGEBACK' : 'CREDIT';
     const mensagemTelegram = `${tipoTarefa}:${userIdLimpo}:${usd}`;
     
