@@ -1,25 +1,10 @@
-
 {
-  "name": "tbot-timewall-discord",
+  "name": "rl-rewards-render-bridge",
   "version": "1.0.0",
-  "description": "Bot Discord para processar postbacks do TimeWall",
-  "main": "Tbot.js",
-  "scripts": {
-    "start": "node Tbot.js"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "discord.js": "14.27.0"
-  },
-  "engines": {
-    "node": ">=22.12.0"
-  },
-  "keywords": [
-    "discord",
-    "timewall",
-    "bot",
-    "postback"
-  ],
-  "author": "Ricardoproexp",
-  "license": "MIT"
+  "private": true,
+  "description": "TimeWall and NOWPayments verified callbacks to Discord relay",
+  "main": "index.js",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node index.js", "test": "node --test test_bridge.cjs" },
+  "dependencies": { "discord.js": "^14.19.3", "express": "^4.21.2" }
 }
