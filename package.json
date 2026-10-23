@@ -1,0 +1,18 @@
+{
+  "name": "tbot-timewall-plisio",
+  "version": "2.0.0",
+  "private": true,
+  "description": "TimeWall and Plisio API bridge for Northflank, Discord and Termux",
+  "main": "index.js",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test test_bridge.cjs test_plisio.cjs"
+  },
+  "dependencies": {
+    "discord.js": "^14.19.3",
+    "express": "^4.21.2"
+  }
+}
