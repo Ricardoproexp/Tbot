@@ -23,7 +23,7 @@ PLISIO_PUBLIC_URL=https://rl--proexp--xhptbm9xzrwv.code.run
 
 O segredo da ligação tem de ter pelo menos 32 caracteres. Não publiques tokens ou segredos no GitHub. O domínio acima é o mostrado nos logs fornecidos; atualiza se mudares de serviço.
 
-PORT, canal, limites e autorização de envios estão em config.cjs. O canal atual é 1559371192400613450, a porta é 3001, o limite é 1 LTC por levantamento e 10 LTC por fatura. Para bloquear novos envios, muda payoutsEnabled para false e reinicia. As antigas variáveis PLISIO_PERSISTENT_STORAGE_CONFIRMED e PLISIO_DB_PATH não são necessárias.
+PORT, canal, limites e autorização de envios estão em config.cjs. O canal atual é 1559371192400613450, a porta é 3001, os limites por levantamento são 1 LTC, 0.001 BTC e 1 SOL; por fatura, 10 LTC. Para bloquear novos envios, muda payoutsEnabled para false e reinicia. As antigas variáveis PLISIO_PERSISTENT_STORAGE_CONFIRMED e PLISIO_DB_PATH não são necessárias.
 
 ## Armazenamento pelo Discord
 
@@ -41,7 +41,7 @@ Não faz migração automática de uma base /data antiga. No cenário dos logs f
 
 Mantém o último Tbot3.py, bot_final.db e Users. O PLISIO_BRIDGE_SECRET do Termux tem de ser igual ao do Northflank; PLISIO_BRIDGE_URL usa o mesmo domínio público. O POSTBACK_AUTHOR_IDS contém o ID do emissor Discord.
 
-A URL de callback é https://rl--proexp--xhptbm9xzrwv.code.run/webhooks/plisio?json=true. O código envia-a ao criar faturas. Litecoin continua a ser a moeda suportada nesta versão.
+A URL de callback é https://rl--proexp--xhptbm9xzrwv.code.run/webhooks/plisio?json=true. O código envia-a ao criar faturas. Os levantamentos suportam LTC, BTC e SOL nas redes nativas. As faturas de depósito continuam LTC. Ativa as três moedas no painel Plisio; cada levantamento exige saldo próprio na moeda escolhida, além das taxas. Não há conversão automática entre os saldos.
 
 A exigência de autorizar o IP de saída na Plisio continua a aplicar-se: esta alteração resolve o armazenamento, não altera as regras da API. Não foi confirmada a disponibilidade de IP fixo no teu plano. Se a API recusar o IP, o servidor pode estar online mas os pagamentos não funcionam até resolver esse acesso.
 
@@ -49,6 +49,8 @@ A exigência de autorizar o IP de saída na Plisio continua a aplicar-se: esta a
 
 npm test
 
-23 testes offline passaram, incluindo TimeWall, assinaturas, histórico paginado, mensagens divididas, reconstrução após perda da cache, confirmação sem White Label, indisponibilidade do Discord e proteção contra reenvio. Não houve chamadas reais ao Plisio ou Discord, pagamentos, alterações no GitHub nem instalação na tua conta Northflank.
+27 testes offline passaram, incluindo TimeWall, assinaturas, histórico paginado, mensagens divididas, reconstrução após perda da cache, confirmação sem White Label, indisponibilidade do Discord e proteção contra reenvio. Não houve chamadas reais ao Plisio ou Discord, pagamentos, alterações no GitHub nem instalação na tua conta Northflank.
 
 Referência Discord: https://discord.com/developers/docs/resources/message (mensagens limitadas a 2000 caracteres e leitura do histórico paginada até 100 mensagens). O programa divide e cifra registos grandes, usa o disco temporário durante a recuperação e respeita o cliente Discord para os limites de pedidos.
+
+Atualiza também Tbot3.py e locales para a versão LTC/BTC/SOL. Não são necessárias novas variáveis. Os limites públicos maxPayoutLtc, maxPayoutBtc e maxPayoutSol ficam em config.cjs. O ID API de Solana é SOL; o código normaliza o nome Solana nos recibos. Mantém o histórico do Discord e o mesmo segredo.

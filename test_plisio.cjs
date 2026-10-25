@@ -101,3 +101,34 @@ test('minimal production config uses disposable cache and no mounted volume',()=
  assert.throws(()=>environment({...e,PLISIO_PUBLIC_URL:'http://bad.test'}),/HTTPS/);
  assert.throws(()=>environment({...e,PLISIO_API_KEY:''}),/Missing/);
 });
+for(const [coin,addr,amount] of [['BTC','1'+'A'.repeat(33),'0.0001'],['SOL','1'.repeat(32),'0.000000001']]) {
+ test(coin+' payout routes fees, balance and transfer; normalizes receipt and replays once',async()=>{
+  let sends=0;const calls=[];
+  const mock=async(p,v)=>{calls.push(p);
+   if(p==='/operations/commission/'+coin)return {fee:'0.000000001',commission:'0'};
+   if(p==='/balances/'+coin)return {balance:'10'};
+   if(p==='/operations/withdraw'){sends++;assert.equal(v.currency,coin);return {id:op,type:'cash_out',status:'completed',psys_cid:coin,currency:coin==='SOL'?'Solana':coin,amount,wallet_hash:addr};}
+   if(p==='/operations/'+op)return {id:op,type:'cash_out',status:'completed'};
+   throw Error('unexpected');};
+  const {svc,env}=setup(mock);const req={...payload,currency:coin,address:addr,amount};
+  await svc.rpc(req);const result=await svc.rpc({action:'operation',id:op});assert.equal(result.currency,coin);assert.equal(result.amount,amount);
+  await assert.rejects(()=>svc.rpc({...req,currency:'LTC',address,amount:'0.1'}),/idempotency_conflict/);
+  svc.db.close();const restored=createService(env,mock);await restored.rpc(req);assert.equal(sends,1);restored.db.close();
+ });
+}
+test('rates require selected available coin and payouts enforce precision/network/limits',async()=>{
+ const {svc}=setup(async p=>{assert.equal(p,'/currencies/USD');return [{cid:'LTC',price_usd:'100',hidden:0},{cid:'BTC',price_usd:'90000',hidden:0},{cid:'SOL',price_usd:'150',hidden:0}];});
+ for(const coin of ['LTC','BTC','SOL'])assert.equal((await svc.rpc({action:'rate',currency:coin})).currency,coin);
+ for(const p of [{currency:'DOGE',amount:'0.1',address},{currency:'BTC',amount:'0.1',address:'1'+'A'.repeat(33)},{currency:'SOL',amount:'0.0000000001',address:'1'.repeat(32)},{currency:'SOL',amount:'0.1',address},{currency:'BTC',amount:'0.0001',address}])await assert.rejects(()=>svc.rpc({...payload,...p}));
+ svc.db.close();
+});
+test('SOL reconciliation rejects conflicting currency code',async()=>{
+ const {svc}=setup(async(p,v)=>{
+  if(p.startsWith('/operations/commission/'))return {fee:'0',commission:'0'};
+  if(p.startsWith('/balances/'))return {balance:'10'};
+  if(p==='/operations/withdraw')throw Error('lost');
+  return {id:op,type:'cash_out',status:'completed',psys_cid:'SOL',currency:'BTC',wallet_hash:'1'.repeat(32),amount:'0.1'};
+ });
+ await svc.rpc({...payload,currency:'SOL',address:'1'.repeat(32)});
+ await assert.rejects(()=>svc.rpc({action:'reconcile',key:payload.key,id:op}),/mismatch/);svc.db.close();
+});

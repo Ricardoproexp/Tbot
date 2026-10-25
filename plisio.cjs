@@ -5,9 +5,38 @@ const {DatabaseSync} = require('node:sqlite');
 const fs = require('node:fs');
 const path = require('node:path');
 const ID = /^[a-f0-9]{24}$/i;
-function units(s) {
-  if (typeof s !== 'string' || !/^\d{1,10}(?:\.\d{1,8})?$/.test(s)) throw Error('invalid_amount');
-  const [a,b=''] = s.split('.'); return BigInt(a)*100000000n+BigInt(b.padEnd(8,'0'));
+const COINS={LTC:8,BTC:8,SOL:9};
+const LIMITS={LTC:'1',BTC:'0.001',SOL:'1'};
+function coinId(value) {
+  // Plisio lists SOL as the ID and Solana as its display currency code.
+  return value==='Solana'?'SOL':value;
+}
+function supported(value) {
+  if(!Object.hasOwn(COINS,value)) throw Error('unsupported_currency');
+  return value;
+}
+function units(s,currency='LTC') {
+  const precision=COINS[supported(currency)];
+  if(typeof s!=='string' || !/^\d{1,10}(?:\.\d+)?$/.test(s)) throw Error('invalid_amount');
+  const [a,b='']=s.split('.');
+  if(b.length>precision) throw Error('invalid_precision');
+  return BigInt(a)*10n**BigInt(precision)+BigInt(b.padEnd(precision,'0'));
+}
+function addressValid(currency,address) {
+  if(typeof address!=='string') return false;
+  const base58='[1-9A-HJ-NP-Za-km-z]';
+  if(currency==='SOL') {
+    if(!new RegExp('^'+base58+'{32,44}$').test(address)) return false;
+    const alphabet='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    let value=0n;for(const c of address)value=value*58n+BigInt(alphabet.indexOf(c));
+    let bytes=0;while(value){bytes++;value>>=8n;}
+    return bytes+(address.match(/^1*/)[0].length)===32;
+  }
+  const prefix=currency==='BTC'?'[13]':'[LM3]';
+  const hrp=currency==='BTC'?'bc1':'ltc1';
+  return new RegExp('^'+prefix+base58+'{25,34}$').test(address) ||
+    (address===address.toLowerCase() || address===address.toUpperCase()) &&
+    new RegExp('^'+hrp+'[ac-hj-np-z02-9]{11,87}$','i').test(address);
 }
 function signatureValid(data, key) {
   if (!data || !/^[a-f0-9]{40}$/i.test(data.verify_hash || '')) return false;
@@ -45,18 +74,20 @@ function createService(env, apiOverride, journal) {
   });
   function record(key) {const r=db.prepare('SELECT * FROM jobs WHERE key=?').get(key); return r ? {...r,result:r.result?JSON.parse(r.result):null}:null;}
   function validatePayment(p) {
-    if(p.currency!=='LTC' || typeof p.address!=='string' || !/^[A-Za-z0-9]{26,100}$/.test(p.address)) throw Error('invalid_ltc_address');
-    const n=units(p.amount); if(n<=0n || n>units(env.PLISIO_MAX_PAYOUT_LTC || '1')) throw Error('payout_limit');
+    supported(p.currency);
+    if(!addressValid(p.currency,p.address)) throw Error('invalid_wallet_address');
+    const n=units(p.amount,p.currency); if(n<=0n || n>units(env['PLISIO_MAX_PAYOUT_'+p.currency] || LIMITS[p.currency],p.currency)) throw Error('payout_limit');
   }
   async function preflight(p) {
     validatePayment(p);
-    const fees=await api('/operations/commission/LTC',{addresses:p.address,amounts:p.amount,type:'cash_out',feePlan:'normal'});
+    const fees=await api('/operations/commission/'+p.currency,{addresses:p.address,amounts:p.amount,type:'cash_out',feePlan:'normal'});
     const f=String(fees.fee), c=String(fees.commission);
     // Provider may return >8 decimal places in fee estimates; round UP.
-    const ceil=s=>{if(!/^\d+(?:\.\d+)?$/.test(s)) throw Error('invalid_fee'); const [a,b='']=s.split('.');return units(a+'.'+b.slice(0,8).padEnd(8,'0'))+( /[1-9]/.test(b.slice(8))?1n:0n);};
-    const bal=await api('/balances/LTC');
-    if(units(String(bal.balance)) < units(p.amount)+ceil(f)+ceil(c)) throw Error('insufficient_provider_balance');
-    return {fee:f,commission:c,currency:'LTC'};
+    const precision=COINS[p.currency];
+    const ceil=s=>{if(!/^\d+(?:\.\d+)?$/.test(s)) throw Error('invalid_fee'); const [a,b='']=s.split('.');return units(a+'.'+b.slice(0,precision).padEnd(precision,'0'),p.currency)+( /[1-9]/.test(b.slice(precision))?1n:0n);};
+    const bal=await api('/balances/'+p.currency);
+    if(units(String(bal.balance),p.currency) < units(p.amount,p.currency)+ceil(f)+ceil(c)) throw Error('insufficient_provider_balance');
+    return {fee:f,commission:c,currency:p.currency};
   }
   function saveResult(key,result,state='DONE') {
     db.prepare('UPDATE jobs SET result=?,state=? WHERE key=?').run(JSON.stringify(result),state,key);
@@ -112,14 +143,14 @@ function createService(env, apiOverride, journal) {
       if(!evidence || evidence.id!==id || evidence.type!=='cash_out')
         throw Error('payout_evidence_unavailable_manual_review');
     }
-    const currency=evidence.psys_cid || evidence.currency;
-    if(currency!==expected.currency || (evidence.psys_cid && evidence.currency && evidence.psys_cid!==evidence.currency)) throw Error('operation_currency_mismatch');
+    const currency=coinId(evidence.psys_cid || evidence.currency);
+    if(currency!==expected.currency || (evidence.psys_cid && evidence.currency && coinId(evidence.psys_cid)!==coinId(evidence.currency))) throw Error('operation_currency_mismatch');
     const amount=String(evidence.amount);
-    if(type==='invoice' ? units(amount)<units(expected.amount) : units(amount)!==units(expected.amount)) throw Error('operation_amount_mismatch');
+    if(type==='invoice' ? units(amount,currency)<units(expected.amount,currency) : units(amount,currency)!==units(expected.amount,currency)) throw Error('operation_amount_mismatch');
     if(type==='cash_out' && evidence.wallet_hash!==expected.address) throw Error('operation_address_mismatch');
     // Never allow an old receipt to conceal conflicting fields in a current API response.
-    if(remote.amount!=null && units(String(remote.amount))!==units(amount)) throw Error('operation_amount_conflict');
-    for(const k of ['psys_cid','currency']) if(remote[k]!=null && remote[k]!==currency) throw Error('operation_currency_conflict');
+    if(remote.amount!=null && units(String(remote.amount),currency)!==units(amount,currency)) throw Error('operation_amount_conflict');
+    for(const k of ['psys_cid','currency']) if(remote[k]!=null && coinId(remote[k])!==currency) throw Error('operation_currency_conflict');
     if(type==='cash_out' && remote.wallet_hash!=null && remote.wallet_hash!==evidence.wallet_hash) throw Error('operation_address_conflict');
     return {...remote, currency, psys_cid:currency, amount,
       ...(type==='cash_out'?{wallet_hash:evidence.wallet_hash}:{}),
@@ -129,9 +160,10 @@ function createService(env, apiOverride, journal) {
     if(!p || typeof p!=='object') throw Error('invalid_request');
     if(p.action==='rate') {
       const rows=await api('/currencies/USD');
-      const ltc=Array.isArray(rows) && rows.find(x=>x.cid==='LTC');
-      if(!ltc || ltc.maintenance || !(Number(ltc.price_usd)>0)) throw Error('ltc_unavailable');
-      return {price_usd:String(ltc.price_usd),min_sum_in:String(ltc.min_sum_in)};
+      const currency=supported(p.currency || 'LTC');
+      const ltc=Array.isArray(rows) && rows.find(x=>x.cid===currency);
+      if(!ltc || ltc.maintenance===true || ltc.maintenance==='true' || ltc.maintenance===1 || ltc.maintenance==='1' || (ltc.hidden!=null && Number(ltc.hidden)!==0) || !Number.isFinite(Number(ltc.price_usd)) || !(Number(ltc.price_usd)>0)) throw Error('currency_unavailable');
+      return {currency,precision:COINS[currency],price_usd:String(ltc.price_usd),min_sum_in:String(ltc.min_sum_in)};
     }
     if(p.action==='quote') return preflight(p);
     if(p.action==='operation') {
@@ -148,7 +180,7 @@ function createService(env, apiOverride, journal) {
       const j=record(p.key);
       if(!j || j.kind!=='payout' || !ID.test(p.id || '')) throw Error('invalid_reconciliation');
       const expected=JSON.parse(j.payload), r=await api('/operations/'+p.id);
-      if(r.id!==p.id || r.type!=='cash_out' || r.status!=='completed' || (r.psys_cid || r.currency)!=='LTC' || r.wallet_hash!==expected.address || units(String(r.amount))!==units(expected.amount)) throw Error('reconciliation_mismatch');
+      if(r.id!==p.id || r.type!=='cash_out' || r.status!=='completed' || coinId(r.psys_cid || r.currency)!==expected.currency || (r.psys_cid && r.currency && coinId(r.psys_cid)!==coinId(r.currency)) || r.wallet_hash!==expected.address || units(String(r.amount),expected.currency)!==units(expected.amount,expected.currency)) throw Error('reconciliation_mismatch');
       await write({kind:'result',key:p.key,id:p.id,result:r,state:'DONE'}); return {state:'DONE',result:r};
     }
     if(!['invoice','payout'].includes(p.action) || !/^[a-z0-9-]{8,80}$/.test(p.key || '')) throw Error('invalid_action_or_key');
@@ -157,7 +189,7 @@ function createService(env, apiOverride, journal) {
       if(units(p.amount)<=0n || units(p.amount)>units(env.PLISIO_MAX_DEPOSIT_LTC || '10')) throw Error('deposit_limit');
       const base=new URL(env.PLISIO_PUBLIC_URL); if(base.protocol!=='https:') throw Error('https_required');
       payload={amount:p.amount,currency:'LTC'};
-    } else {validatePayment(p); payload={amount:p.amount,currency:'LTC',address:p.address};}
+    } else {validatePayment(p); payload={amount:p.amount,currency:p.currency,address:p.address};}
     const fingerprint=JSON.stringify(payload), old=record(p.key);
     if(old) {
       if(old.kind!==p.action || old.fingerprint!==fingerprint) throw Error('idempotency_conflict');
@@ -168,7 +200,7 @@ function createService(env, apiOverride, journal) {
       await preflight(payload);
       await write({kind:'claim',key:p.key,action:p.action,payload,fingerprint,created:Date.now()});
       try {
-        const r=await api('/operations/withdraw',{currency:'LTC',type:'cash_out',to:p.address,amount:p.amount});
+        const r=await api('/operations/withdraw',{currency:p.currency,type:'cash_out',to:p.address,amount:p.amount});
         if(!ID.test(r.id || '')) throw Error('missing_payout_id');
         await write({kind:'result',key:p.key,id:r.id,result:r,state:'DONE'}); return {state:'DONE',result:r};
       } catch {await write({kind:'result',key:p.key,result:null,state:'UNKNOWN'}); return {state:'UNKNOWN',result:null};}

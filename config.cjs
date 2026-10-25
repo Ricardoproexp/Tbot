@@ -9,6 +9,8 @@ const config=Object.freeze({
   // SQLite is only a disposable cache, restored from the Discord journal.
   databasePath:null,
   maxPayoutLtc:'1',
+  maxPayoutBtc:'0.001',
+  maxPayoutSol:'1',
   maxDepositLtc:'10',
   payoutsEnabled:true,
 });
@@ -26,6 +28,7 @@ function environment(secrets=process.env) {
     PLISIO_ENABLED:'true',PLISIO_DB_PATH:path.join(fs.mkdtempSync(path.join(os.tmpdir(),'tbot-cache-')),'plisio.sqlite'),
     PLISIO_STORAGE_MODE:'discord',
     PLISIO_PAYOUTS_ENABLED:String(config.payoutsEnabled),
+    PLISIO_MAX_PAYOUT_BTC:config.maxPayoutBtc,PLISIO_MAX_PAYOUT_SOL:config.maxPayoutSol,
     PLISIO_MAX_PAYOUT_LTC:config.maxPayoutLtc,PLISIO_MAX_DEPOSIT_LTC:config.maxDepositLtc,
   };
 }
