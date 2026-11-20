@@ -33,6 +33,7 @@ The available withdrawal currencies are BTC, LTC and SOL. Recipient must be a Fa
 ## Safety behavior
 - Every payout has an idempotency key derived from the withdrawal request. Retrying a request uses the same key.
 - If the result is uncertain, the RL'$ reservation remains held and the request is flagged for manual review; do not create another request or change the key.
+- Definite provider rejections are marked FAILED and may be refunded by an administrator.
 - Successful v2 response marks the withdrawal paid. Reconcile ambiguous requests in FaucetPay dashboard before any manual balance change.
 - API keys are never logged or committed.
 
