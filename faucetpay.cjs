@@ -19,7 +19,7 @@ function createService(env,apiOverride,journal){
   let response;try{response=await fetch('https://faucetpay.io/api/v2'+endpoint,{method:'POST',headers:{'content-type':'application/json','authorization':'Bearer '+(send?env.FAUCETPAY_SEND_KEY:env.FAUCETPAY_READ_KEY)},body:JSON.stringify(body),signal:AbortSignal.timeout(25000),redirect:'error'});}catch{throw Error('provider_request_uncertain');}
   let raw;try{raw=await response.text();if(raw.length>1024*1024)throw Error();}catch{throw Error('invalid_provider_response');}
   let j;try{j=JSON.parse(raw);}catch{throw Error('invalid_provider_response');}
-  if(!response.ok||j.success!==true||!j.data||typeof j.data!=='object')throw Error(/^[a-z0-9_]{1,80}$/.test(String(j.code||''))?String(j.code):'provider_rejected');return j.data;
+  const ok=response.ok&&(j.success===true||j.status===200);const data=j.data&&typeof j.data==='object'?j.data:(j.status===200?Object.fromEntries(Object.entries(j).filter(([k])=>!['status','message'].includes(k))):null);if(!ok||!data||typeof data!=='object')throw Error(/^[a-z0-9_]{1,80}$/.test(String(j.code||''))?String(j.code):'provider_rejected');return data;
  });
  function record(k){const r=db.prepare('SELECT * FROM jobs WHERE key=?').get(k);return r?{...r,result:r.result?JSON.parse(r.result):null}:null;}
  function save(k,r,s){db.prepare('UPDATE jobs SET result=?,state=? WHERE key=?').run(r==null?null:JSON.stringify(r),s,k);}
