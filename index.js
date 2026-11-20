@@ -17,7 +17,7 @@ function createApp({ env = process.env, sendDiscord, isReady, botId = () => null
   const app = express();
   app.disable('x-powered-by');
   const channelId = env.DISCORD_CHANNEL_ID || '1559371192400613450';
-  app.get('/', (_req, res) => res.status(200).send('Tbot — TimeWall / Plisio relay online'));
+  app.get('/', (_req, res) => res.status(200).send('Tbot — TimeWall / FaucetPay payout relay online'));
   app.get('/health', (_req, res) => res.status(isReady() ? 200 : 503).json({
     status: isReady() ? 'online' : 'starting',
     discord: isReady() ? 'connected' : 'disconnected',
