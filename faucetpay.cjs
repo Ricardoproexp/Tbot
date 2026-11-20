@@ -15,12 +15,12 @@ function createService(env,apiOverride,journal){
  const db=new DatabaseSync(env.FAUCETPAY_DB_PATH);db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
  CREATE TABLE IF NOT EXISTS jobs(key TEXT PRIMARY KEY,kind TEXT NOT NULL,fingerprint TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL,result TEXT,created INTEGER NOT NULL);
  CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY,payload TEXT NOT NULL,created INTEGER NOT NULL);`);
- const api=apiOverride||async(endpoint,body={},send=false)=>{
+ const api=apiOverride||(async(endpoint,body={},send=false)=>{
   let response;try{response=await fetch('https://faucetpay.io/api/v2'+endpoint,{method:'POST',headers:{'content-type':'application/json','authorization':'Bearer '+(send?env.FAUCETPAY_SEND_KEY:env.FAUCETPAY_READ_KEY)},body:JSON.stringify(body),signal:AbortSignal.timeout(25000),redirect:'error'});}catch{throw Error('provider_request_uncertain');}
   let raw;try{raw=await response.text();if(raw.length>1024*1024)throw Error();}catch{throw Error('invalid_provider_response');}
   let j;try{j=JSON.parse(raw);}catch{throw Error('invalid_provider_response');}
   if(!response.ok||j.success!==true||!j.data||typeof j.data!=='object')throw Error(/^[a-z0-9_]{1,80}$/.test(String(j.code||''))?String(j.code):'provider_rejected');return j.data;
- };
+ });
  function record(k){const r=db.prepare('SELECT * FROM jobs WHERE key=?').get(k);return r?{...r,result:r.result?JSON.parse(r.result):null}:null;}
  function save(k,r,s){db.prepare('UPDATE jobs SET result=?,state=? WHERE key=?').run(r==null?null:JSON.stringify(r),s,k);}
  function restore(e){if(e.kind==='claim')db.prepare("INSERT OR IGNORE INTO jobs VALUES(?,?,?,?, 'SUBMITTING',NULL,?)").run(e.key,e.action,e.fingerprint,JSON.stringify(e.payload),e.created);else if(e.kind==='result'){if(!record(e.key))throw Error('journal_missing_claim');save(e.key,e.result,e.state);}else if(e.kind==='event')db.prepare('INSERT OR IGNORE INTO events VALUES(?,?,?)').run(e.digest,JSON.stringify(e.payload),e.created);else throw Error('invalid_journal_record');}
