@@ -22,11 +22,11 @@ test('TimeWall credit, chargeback, validation and delivery failures',async()=>{
   fail=true;assert.equal((await post()).status,503);assert.equal(sent.length,count);fail=false;
   assert.equal((await fetch(base+'/test-postback')).status,403);
   assert.equal((await fetch(base+'/test-postback',{headers:{'x-test-token':env.TEST_TOKEN}})).status,200);assert.match(sent.at(-1),/^TEST:/);
-  let health=await fetch(base+'/health');assert.equal(health.status,200);health=await health.json();assert.equal(health.timewall,'configured');assert.equal(health.plisio,'disabled');
+  let health=await fetch(base+'/health');assert.equal(health.status,200);health=await health.json();assert.equal(health.timewall,'configured');assert.equal(health.faucetpay,'disabled');
   ready=false;assert.equal((await fetch(base+'/health')).status,503);
  } finally {await new Promise(r=>server.close(r));}
 });
 
-test('TimeWall-only configuration starts without Plisio credentials or database',()=>{
+test('TimeWall-only configuration starts without FaucetPay credentials or database',()=>{
  assert.doesNotThrow(()=>createApp({env:{TIMEWALL:'test'},sendDiscord:async()=>{},isReady:()=>true}));
 });

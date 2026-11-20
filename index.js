@@ -17,13 +17,13 @@ function createApp({ env = process.env, sendDiscord, isReady, botId = () => null
   const app = express();
   app.disable('x-powered-by');
   const channelId = env.DISCORD_CHANNEL_ID || '1559371192400613450';
-  app.get('/', (_req, res) => res.status(200).send('Tbot — TimeWall / Plisio relay online'));
+  app.get('/', (_req, res) => res.status(200).send('Tbot — TimeWall / FaucetPay payout relay online'));
   app.get('/health', (_req, res) => res.status(isReady() ? 200 : 503).json({
     status: isReady() ? 'online' : 'starting',
     discord: isReady() ? 'connected' : 'disconnected',
     discord_bot_id: botId(), discord_channel: channelId,
     timewall: env.TIMEWALL ? 'configured' : 'not configured',
-    plisio: env.PLISIO_ENABLED === 'true' ? 'enabled' : 'disabled',
+    faucetpay: env.FAUCETPAY_ENABLED === 'true' ? 'enabled' : 'disabled',
   }));
 
   // Preserve the original TimeWall URL, SHA-256 formula and CREDIT/CHARGEBACK format.
@@ -63,7 +63,7 @@ function createApp({ env = process.env, sendDiscord, isReady, botId = () => null
     }
   });
 
-  require('./plisio.cjs').install(app, {env, sendDiscord, isReady, service});
+  require('./faucetpay.cjs').install(app, {env, sendDiscord, isReady, service});
 
   app.get('/test-postback', async (req, res) => {
     if (!constantToken(env.TEST_TOKEN, req.get('x-test-token'))) return res.status(403).send('Forbidden');
@@ -86,14 +86,14 @@ async function main() {
   const env = require('./config.cjs').environment();
   const { Client, GatewayIntentBits } = require('discord.js');
   const token = env.TBOT_TOKEN;
-  if (!token || (!env.TIMEWALL && env.PLISIO_ENABLED !== 'true')) {
-    throw new Error('Configure TBOT_TOKEN and TIMEWALL and/or PLISIO_ENABLED=true');
+  if (!token || (!env.TIMEWALL && env.FAUCETPAY_ENABLED !== 'true')) {
+    throw new Error('Configure TBOT_TOKEN and TIMEWALL and/or FAUCETPAY_ENABLED=true');
   }
   const channelId = env.DISCORD_CHANNEL_ID || '1559371192400613450';
   if (!/^\d+$/.test(channelId)) throw new Error('Invalid DISCORD_CHANNEL_ID');
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
   let journal, recovered=false;
-  const service=require('./plisio.cjs').createService(env,undefined,{
+  const service=require('./faucetpay.cjs').createService(env,undefined,{
     append: entry=>{
       if(!recovered || !journal || journal.broken) throw Error('discord_recovering');
       return journal.append(entry);
@@ -118,8 +118,8 @@ async function main() {
       if(!channel?.messages || !channel.permissionsFor(client.user)?.has([
           PermissionFlagsBits.ViewChannel,PermissionFlagsBits.ReadMessageHistory,PermissionFlagsBits.SendMessages]))
         throw Error('Grant View Channel, Read Message History and Send Messages to the Discord bot');
-      journal=new (require('./discord-journal.cjs').DiscordJournal)({channel,authorId:client.user.id,secret:env.PLISIO_BRIDGE_SECRET});
-      console.log('Recovering Plisio records from Discord history...');
+      journal=new (require('./discord-journal.cjs').DiscordJournal)({channel,authorId:client.user.id,secret:env.FAUCETPAY_BRIDGE_SECRET});
+      console.log('Recovering FaucetPay payout journal from Discord history...');
       await journal.recover(service.restore);
       recovered=true;
       console.log(`Discord ready; relay author ID: ${client.user.id}; recovered ${journal.seq} records`);
