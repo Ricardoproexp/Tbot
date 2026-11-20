@@ -1,0 +1,13 @@
+'use strict';
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const os=require('node:os');
+const path=require('node:path');
+const crypto=require('node:crypto');
+const {createService,units,authValid}=require('./faucetpay.cjs');
+const makeEnv=()=>({FAUCETPAY_SEND_KEY:'send-test',FAUCETPAY_READ_KEY:'read-test',FAUCETPAY_BRIDGE_SECRET:'x'.repeat(40),FAUCETPAY_DB_PATH:path.join(fs.mkdtempSync(path.join(os.tmpdir(),'fp-test-')),'bridge.sqlite'),FAUCETPAY_PERSISTENT_STORAGE_CONFIRMED:'yes'});
+test('crypto amounts use integer smallest units',()=>{assert.equal(units('0.00000001','BTC'),1n);assert.equal(units('1.25','LTC'),125000000n);assert.equal(units('0.000000001','SOL'),1n);assert.throws(()=>units('0.000000001','BTC'));});
+test('bridge HMAC accepts only the signed body',()=>{const raw=Buffer.from('{"action":"job"}'),stamp='1700000000',secret='s'.repeat(40),sig=crypto.createHmac('sha256',secret).update(stamp+'.').update(raw).digest('hex');assert.equal(authValid(raw,stamp,sig,secret,1700000000000),true);assert.equal(authValid(Buffer.from('{}'),stamp,sig,secret,1700000000000),false);});
+test('payout is idempotent for one withdrawal key',async()=>{const env=makeEnv();let sends=0;const api=async(endpoint,body,send)=>{if(endpoint==='/check-address')return {payout_user_hash:'hash'};if(endpoint==='/balance')return {balance:'1000000000'};if(endpoint==='/send'){sends++;assert.equal(send,true);assert.equal(body.idempotency_key,'withdraw-12345678');return {payout_id:555};}throw Error('unexpected_api');};const svc=createService(env,api,{append:async()=>{}});const request={action:'payout',key:'withdraw-12345678',currency:'LTC',amount:'0.00000100',address:'fpuser@example.com'};const first=await svc.rpc(request),again=await svc.rpc(request);assert.equal(first.state,'DONE');assert.equal(first.result.payout_id,'555');assert.deepEqual(again,first);assert.equal(sends,1);svc.db.close();});
+test('idempotency key conflicts if payout details change',async()=>{const env=makeEnv();const api=async(endpoint)=>endpoint==='/check-address'?{payout_user_hash:'hash'}:endpoint==='/balance'?{balance:'999999999'}:{payout_id:1};const svc=createService(env,api,{append:async()=>{}});await svc.rpc({action:'payout',key:'withdraw-12345678',currency:'LTC',amount:'0.00000100',address:'user@example.com'});await assert.rejects(svc.rpc({action:'payout',key:'withdraw-12345678',currency:'BTC',amount:'0.00000100',address:'user@example.com'}),/idempotency_conflict/);svc.db.close();});
