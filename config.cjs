@@ -8,11 +8,7 @@ const config=Object.freeze({
   discordChannelId:'1559371192400613450',
   // SQLite is only a disposable cache, restored from the Discord journal.
   databasePath:null,
-  maxPayoutLtc:'1',
-  maxPayoutBtc:'0.001',
-  maxPayoutSol:'1',
-  maxDepositLtc:'10',
-  payoutsEnabled:true,
+  usdPerInternalUnit:'1',
 });
 function environment(secrets=process.env) {
   for(const key of ['TBOT_TOKEN','TIMEWALL','FAUCETPAY_SEND_KEY','FAUCETPAY_READ_KEY','FAUCETPAY_BRIDGE_SECRET','FAUCETPAY_PUBLIC_URL'])
