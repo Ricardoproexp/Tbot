@@ -27,7 +27,7 @@ Set these in `termux.env` (do not commit the file):
 - `FAUCETPAY_BRIDGE_SECRET` (same as Northflank)
 - `FAUCETPAY_USD_PER_UNIT=1` (RL'$ conversion basis; adjust only if the internal unit's USD value changes)
 
-The available withdrawal currencies are BTC, LTC and SOL. Recipient must be a FaucetPay-payable username/email/address for the selected coin; recipient eligibility is checked before approval and again before sending. Amounts are converted using a live USD price feed and sent as integer smallest units. Provider fee estimates are shown as zero because the v2 send API does not expose a payout fee quote; do not interpret this as a guarantee for external/on-chain recipients.
+The available withdrawal currencies are BTC, LTC and SOL. Recipient must be a FaucetPay-payable username/email/address for the selected coin; recipient eligibility is checked before approval and again before sending. Amounts are converted using a live USD price feed and sent as integer smallest units. The v2 send API does not expose a payout fee quote, so the bot displays that fees are not estimated. This flow is for FaucetPay-payable recipients; it is not a separate direct on-chain withdrawal service.
 
 ## Safety behavior
 - Every payout has an idempotency key derived from the withdrawal request. Retrying a request uses the same key.
