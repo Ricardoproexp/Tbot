@@ -11,19 +11,15 @@ const config=Object.freeze({
   usdPerInternalUnit:'1',
 });
 function environment(secrets=process.env) {
-  for(const key of ['TBOT_TOKEN','TIMEWALL','FAUCETPAY_SEND_KEY','FAUCETPAY_READ_KEY','FAUCETPAY_BRIDGE_SECRET','FAUCETPAY_PUBLIC_URL'])
+  for(const key of ['TBOT_TOKEN','TIMEWALL','FAUCETPAY_SEND_KEY','FAUCETPAY_READ_KEY','FAUCETPAY_BRIDGE_SECRET'])
     if(!secrets[key]) throw Error('Missing '+key);
-  const url=new URL(secrets.FAUCETPAY_PUBLIC_URL);
-  if(url.protocol!=='https:' || url.username || url.password || url.search || url.hash || url.pathname!=='/')
-    throw Error('FAUCETPAY_PUBLIC_URL must be an HTTPS origin without a path');
   return {
     TBOT_TOKEN:secrets.TBOT_TOKEN,TIMEWALL:secrets.TIMEWALL,
     FAUCETPAY_SEND_KEY:secrets.FAUCETPAY_SEND_KEY,FAUCETPAY_READ_KEY:secrets.FAUCETPAY_READ_KEY,FAUCETPAY_BRIDGE_SECRET:secrets.FAUCETPAY_BRIDGE_SECRET,
-    FAUCETPAY_PUBLIC_URL:url.origin,
     PORT:String(config.port),DISCORD_CHANNEL_ID:config.discordChannelId,
     FAUCETPAY_ENABLED:'true',FAUCETPAY_DB_PATH:path.join(fs.mkdtempSync(path.join(os.tmpdir(),'tbot-cache-')),'faucetpay.sqlite'),
     FAUCETPAY_STORAGE_MODE:'discord',
-    FAUCETPAY_PERSISTENT_STORAGE_CONFIRMED:'yes',
+    FAUCETPAY_PERSISTENT_STORAGE_CONFIRMED:'yes',FAUCETPAY_USD_PER_UNIT:String(config.usdPerInternalUnit),
   };
 }
 module.exports={config,environment};
