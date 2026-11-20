@@ -15,21 +15,19 @@ const config=Object.freeze({
   payoutsEnabled:true,
 });
 function environment(secrets=process.env) {
-  for(const key of ['TBOT_TOKEN','TIMEWALL','PLISIO_API_KEY','PLISIO_BRIDGE_SECRET','PLISIO_PUBLIC_URL'])
+  for(const key of ['TBOT_TOKEN','TIMEWALL','FAUCETPAY_SEND_KEY','FAUCETPAY_READ_KEY','FAUCETPAY_BRIDGE_SECRET','FAUCETPAY_PUBLIC_URL'])
     if(!secrets[key]) throw Error('Missing '+key);
-  const url=new URL(secrets.PLISIO_PUBLIC_URL);
+  const url=new URL(secrets.FAUCETPAY_PUBLIC_URL);
   if(url.protocol!=='https:' || url.username || url.password || url.search || url.hash || url.pathname!=='/')
-    throw Error('PLISIO_PUBLIC_URL must be an HTTPS origin without a path');
+    throw Error('FAUCETPAY_PUBLIC_URL must be an HTTPS origin without a path');
   return {
     TBOT_TOKEN:secrets.TBOT_TOKEN,TIMEWALL:secrets.TIMEWALL,
-    PLISIO_API_KEY:secrets.PLISIO_API_KEY,PLISIO_BRIDGE_SECRET:secrets.PLISIO_BRIDGE_SECRET,
-    PLISIO_PUBLIC_URL:url.origin,
+    FAUCETPAY_SEND_KEY:secrets.FAUCETPAY_SEND_KEY,FAUCETPAY_READ_KEY:secrets.FAUCETPAY_READ_KEY,FAUCETPAY_BRIDGE_SECRET:secrets.FAUCETPAY_BRIDGE_SECRET,
+    FAUCETPAY_PUBLIC_URL:url.origin,
     PORT:String(config.port),DISCORD_CHANNEL_ID:config.discordChannelId,
-    PLISIO_ENABLED:'true',PLISIO_DB_PATH:path.join(fs.mkdtempSync(path.join(os.tmpdir(),'tbot-cache-')),'plisio.sqlite'),
-    PLISIO_STORAGE_MODE:'discord',
-    PLISIO_PAYOUTS_ENABLED:String(config.payoutsEnabled),
-    PLISIO_MAX_PAYOUT_BTC:config.maxPayoutBtc,PLISIO_MAX_PAYOUT_SOL:config.maxPayoutSol,
-    PLISIO_MAX_PAYOUT_LTC:config.maxPayoutLtc,PLISIO_MAX_DEPOSIT_LTC:config.maxDepositLtc,
+    FAUCETPAY_ENABLED:'true',FAUCETPAY_DB_PATH:path.join(fs.mkdtempSync(path.join(os.tmpdir(),'tbot-cache-')),'faucetpay.sqlite'),
+    FAUCETPAY_STORAGE_MODE:'discord',
+    FAUCETPAY_PERSISTENT_STORAGE_CONFIRMED:'yes',
   };
 }
 module.exports={config,environment};
