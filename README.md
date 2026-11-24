@@ -1,46 +1,48 @@
 # Tbot — TimeWall + FaucetPay withdrawal relay
 
-Northflank hosts the authenticated relay for TimeWall callbacks and FaucetPay v2 **payouts only**. This integration intentionally has no deposit/invoice feature. RL'$ balances, withdrawal reservations, referrals and the user ledger remain in the Termux bot's local SQLite database.
+Northflank hosts the authenticated relay for TimeWall callbacks and FaucetPay v2 payouts only. There is no deposit or invoice feature. RL'$ balances, withdrawal reservations, referrals and the user ledger remain in the Termux bot's local SQLite database.
 
 ## Architecture
-- Termux/Python: account balances, withdrawal requests and approval; only reserves RL'$ before approval.
-- Northflank/Node 24: authenticated FaucetPay API relay; v2 send endpoint with idempotency key.
-- Discord: encrypted append-only journal for payout claims/results so the ephemeral Northflank filesystem can be recovered.
-- TimeWall: existing postback endpoint remains unchanged.
+- Termux/Python: account balances, withdrawal requests and admin approval.
+- Northflank/Node 24: authenticated FaucetPay API relay, with idempotent payouts.
+- Discord: encrypted append-only journal for payout claims and results, allowing recovery from ephemeral storage.
+- TimeWall: existing postback endpoint.
 
-Keep the service at **one replica**. Multiple replicas can cause Discord journal conflicts. Do not deploy overlapping instances.
+Run exactly **one replica** to avoid journal conflicts. Do not run overlapping deployments.
 
-## Northflank environment variables
-Required:
-- `TBOT_TOKEN`: Discord journal bot token (rotate if previously exposed).
-- `TIMEWALL`: current TimeWall postback secret.
-- `FAUCETPAY_SEND_KEY`: FaucetPay scoped API key with **send** permission only.
-- `FAUCETPAY_READ_KEY`: FaucetPay scoped API key with **read** permission.
-- `FAUCETPAY_BRIDGE_SECRET`: same random secret as Termux, at least 32 characters.\n- `FAUCETPAY_WEBHOOK_SECRET`: webhook signing secret configured in FaucetPay, kept only in Northflank.
+## Northflank environment
+- `TBOT_TOKEN`: Discord journal bot token.
+- `TIMEWALL`: TimeWall postback secret.
+- `FAUCETPAY_SEND_KEY`: FaucetPay API key with send scope.
+- `FAUCETPAY_READ_KEY`: FaucetPay API key with read scope.
+- `FAUCETPAY_BRIDGE_SECRET`: shared secret with Termux, at least 32 characters.
+- `FAUCETPAY_WEBHOOK_SECRET`: signing secret configured in FaucetPay.
 
-The Node config creates a temporary SQLite cache; Discord journal is the recovery source. It does not need a persistent volume. Keep the Discord bot's View Channel, Read Message History and Send Messages permissions in the configured journal channel.
+The service uses a temporary SQLite cache restored from the Discord journal; no persistent volume is required. Give the Discord bot View Channel, Read Message History and Send Messages permissions in the journal channel.
 
-## FaucetPay webhook\nConfigure the public HTTPS endpoint `https://YOUR-NORTHFLANK-SERVICE-DOMAIN/webhooks/faucetpay` in FaucetPay and subscribe to `payout.failed` (and optionally `payout.sent`). Set the signing secret in Northflank as `FAUCETPAY_WEBHOOK_SECRET`. The service verifies the HMAC against the raw request body before accepting events. Failed events are relayed to Termux for exact payout matching and idempotent refund handling.\n\n## Termux environment
-Set these in `termux.env` (do not commit the file):
+## FaucetPay webhook
+Configure the HTTPS URL `https://YOUR-NORTHFLANK-SERVICE-DOMAIN/webhooks/faucetpay` in FaucetPay for `payout.failed` events. Set the webhook signing secret in Northflank. Requests are verified using HMAC against the raw body. Failed payouts are relayed to Termux for matching and safe, idempotent refund handling.
+
+## Termux environment
+Set in `termux.env` (do not commit):
 - `FAUCETPAY_ENABLED=true`
 - `FAUCETPAY_BRIDGE_URL=https://YOUR-NORTHFLANK-SERVICE-DOMAIN`
-- `FAUCETPAY_BRIDGE_SECRET` (same as Northflank)
-- `FAUCETPAY_USD_PER_UNIT=1` (RL'$ conversion basis; adjust only if the internal unit's USD value changes)
+- `FAUCETPAY_BRIDGE_SECRET` (same secret as Northflank)
+- `FAUCETPAY_USD_PER_UNIT=1` (RL'$ conversion basis)
 
-The available withdrawal currencies are BTC, LTC and SOL. Recipient must be a FaucetPay-payable username/email/address for the selected coin; recipient eligibility is checked before approval and again before sending. Amounts are converted using a live USD price feed and sent as integer smallest units. The v2 send API does not expose a payout fee quote, so the bot displays that fees are not estimated. This flow is for FaucetPay-payable recipients; it is not a separate direct on-chain withdrawal service.
+Supported withdrawal currencies: BTC, LTC and SOL. Recipients must be FaucetPay-payable for the selected currency. Recipient eligibility and provider balance are checked before payout. Amounts use integer smallest units. FaucetPay v2 does not provide a fee quote; fees are not estimated.
 
-## Safety behavior
-- Every payout has an idempotency key derived from the withdrawal request. Retrying a request uses the same key.
-- If the result is uncertain, the RL'$ reservation remains held and the request is flagged for manual review; do not create another request or change the key.
-- Definite provider rejections are marked FAILED and may be refunded by an administrator.
-- Successful v2 response marks the withdrawal paid. Reconcile ambiguous requests in FaucetPay dashboard before any manual balance change.
+## Safety
+- Payouts use a stable idempotency key; retries cannot create a duplicate send.
+- Uncertain outcomes remain reserved for manual reconciliation; do not create another withdrawal or change its key.
+- Definitive rejections are marked failed and can be refunded by an administrator.
+- Successful provider responses mark the payout paid.
 - API keys are never logged or committed.
 
-## Deploy
-1. Stop the current Northflank instance; deploy this branch with Node 24.
-2. Configure environment variables above and build/deploy.
-3. Confirm `/health` reports TimeWall configured and FaucetPay enabled, then verify Discord journal recovery succeeds.
-4. Update Termux `termux.env`, restart the bot, and test with a small payout to your own FaucetPay account.
-5. Do not enable real payouts until API key scopes, balances, destination and unit conversion are checked.
-
-Plisio integration files and tests have been removed; this repository now contains only the active FaucetPay withdrawal integration.
+## Deployment checklist
+1. Deploy on Northflank with Node 24 and one replica.
+2. Set the environment variables above.
+3. Verify `/health` and Discord journal recovery.
+4. Configure the FaucetPay webhook.
+5. Update Termux's `termux.env`, restart the bot and test a small payout to your own FaucetPay account.
+6. Confirm key scopes, balance, recipient and conversion settings before enabling real user payouts.
