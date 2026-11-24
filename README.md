@@ -16,11 +16,11 @@ Required:
 - `TIMEWALL`: current TimeWall postback secret.
 - `FAUCETPAY_SEND_KEY`: FaucetPay scoped API key with **send** permission only.
 - `FAUCETPAY_READ_KEY`: FaucetPay scoped API key with **read** permission.
-- `FAUCETPAY_BRIDGE_SECRET`: same random secret as Termux, at least 32 characters.
+- `FAUCETPAY_BRIDGE_SECRET`: same random secret as Termux, at least 32 characters.\n- `FAUCETPAY_WEBHOOK_SECRET`: webhook signing secret configured in FaucetPay, kept only in Northflank.
 
 The Node config creates a temporary SQLite cache; Discord journal is the recovery source. It does not need a persistent volume. Keep the Discord bot's View Channel, Read Message History and Send Messages permissions in the configured journal channel.
 
-## Termux environment
+## FaucetPay webhook\nConfigure the public HTTPS endpoint `https://YOUR-NORTHFLANK-SERVICE-DOMAIN/webhooks/faucetpay` in FaucetPay and subscribe to `payout.failed` (and optionally `payout.sent`). Set the signing secret in Northflank as `FAUCETPAY_WEBHOOK_SECRET`. The service verifies the HMAC against the raw request body before accepting events. Failed events are relayed to Termux for exact payout matching and idempotent refund handling.\n\n## Termux environment
 Set these in `termux.env` (do not commit the file):
 - `FAUCETPAY_ENABLED=true`
 - `FAUCETPAY_BRIDGE_URL=https://YOUR-NORTHFLANK-SERVICE-DOMAIN`
