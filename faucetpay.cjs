@@ -33,7 +33,7 @@ function createService(env,apiOverride,journal){
   throw Error('invalid_action');}
  return {rpc:p=>serial(()=>rpc(p)),restore,db,api,
   hasEvent:id=>!!db.prepare('SELECT 1 FROM events WHERE id=?').get(id),
-  recordEvent:p=>serial(async()=>{const id=String(p.id||'');if(!/^[A-Za-z0-9_-]{8,160}$/.test(id))throw Error('invalid_event_id');if(!['payout.failed','payout.sent'].includes(p.event))throw Error('invalid_event_type');if(!p.data||!p.data.payout_id)throw Error('invalid_event_data');if(!db.prepare('SELECT 1 FROM events WHERE id=?').get(id))await write({kind:'event',digest:id,payload:p,created:Date.now()});return {duplicate:!!db.prepare('SELECT 1 FROM events WHERE id=?').get(id)};})};
+  recordEvent:p=>serial(async()=>{const id=String(p.id||'');if(!/^[A-Za-z0-9_-]{8,160}$/.test(id))throw Error('invalid_event_id');if(!['payout.failed','payout.sent'].includes(p.event))throw Error('invalid_event_type');if(!p.data||!p.data.payout_id)throw Error('invalid_event_data');const exists=!!db.prepare('SELECT 1 FROM events WHERE id=?').get(id);if(!exists)await write({kind:'event',digest:id,payload:p,created:Date.now()});return {duplicate:exists};})};
 }
 function install(app,{env,isReady,service,sendDiscord}){if(env.FAUCETPAY_ENABLED!=='true')return;const express=require('express'),svc=service||createService(env);
  app.post('/webhooks/faucetpay',express.raw({type:'application/json',limit:'32kb'}),async(req,res)=>{
