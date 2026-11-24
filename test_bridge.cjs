@@ -41,7 +41,7 @@ test('FaucetPay webhook verifies raw HMAC and relays payout.failed only',async()
  try{
   let r=await fetch(base+'/webhooks/faucetpay',{method:'POST',headers:{'content-type':'application/json','x-faucetpay-signature':'sha256='+'0'.repeat(64)},body:raw});assert.equal(r.status,401);
   r=await fetch(base+'/webhooks/faucetpay',{method:'POST',headers:{'content-type':'application/json','x-faucetpay-signature':sig},body:raw});assert.equal(r.status,200);
-  assert.equal(events.length,1);assert.equal(sent[0],'FAUCETPAY_FAILED:event-12345678:pay_123456');
+  assert.equal(events.length,1);assert.match(sent[0],/^FAUCETPAY_FAILED:/);const relay=JSON.parse(Buffer.from(sent[0].split(':')[1],'base64url').toString());assert.deepEqual(relay,{event_id:'event-12345678',payout_id:'pay_123456',currency:'LTC',amount_units:'100',recipient:'user@example.com'});
   const sentBefore=sent.length;payload.event='payout.sent';const raw2=Buffer.from(JSON.stringify(payload)),sig2='sha256='+crypto.createHmac('sha256',secret).update(raw2).digest('hex');
   r=await fetch(base+'/webhooks/faucetpay',{method:'POST',headers:{'content-type':'application/json','x-faucetpay-signature':sig2},body:raw2});assert.equal(r.status,200);assert.equal(sent.length,sentBefore);
  }finally{await new Promise(r=>server.close(r));}
