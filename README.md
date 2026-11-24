@@ -43,4 +43,4 @@ The available withdrawal currencies are BTC, LTC and SOL. Recipient must be a Fa
 4. Update Termux `termux.env`, restart the bot, and test with a small payout to your own FaucetPay account.
 5. Do not enable real payouts until API key scopes, balances, destination and unit conversion are checked.
 
-The old `plisio.cjs` and Plisio test files are retained in the repository history/branch as legacy files, but are no longer loaded by the new service.
+Plisio integration files and tests have been removed; this repository now contains only the active FaucetPay withdrawal integration.
