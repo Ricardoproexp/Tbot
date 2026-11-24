@@ -1,0 +1,21 @@
+name: FaucetPay Bridge Tests
+on:
+  push:
+    branches: [main, faucetpay-migration]
+  pull_request:
+    branches: [main]
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Report dependency audit
+        run: |
+          npm audit --json > audit.json || true
+          node -e "const a=require('./audit.json'); for (const [n,v] of Object.entries(a.vulnerabilities||{})) console.log(n+' | '+v.severity+' | '+v.range+' | fix='+JSON.stringify(v.fixAvailable))"

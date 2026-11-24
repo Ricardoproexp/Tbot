@@ -1,0 +1,51 @@
+'use strict';
+const crypto=require('node:crypto');
+const {DatabaseSync}=require('node:sqlite');
+const fs=require('node:fs');
+const path=require('node:path');
+const COINS={BTC:8,LTC:8,SOL:9},CG={BTC:'bitcoin',LTC:'litecoin',SOL:'solana'};
+function currency(v){const c=String(v||'').toUpperCase();if(!Object.hasOwn(COINS,c))throw Error('unsupported_currency');return c;}
+function units(v,c){c=currency(c);if(typeof v!=='string'||!/^\d{1,20}(?:\.\d+)?$/.test(v))throw Error('invalid_amount');const [a,b='']=v.split('.');if(b.length>COINS[c])throw Error('invalid_precision');return BigInt(a)*10n**BigInt(COINS[c])+BigInt(b.padEnd(COINS[c],'0'));}
+function authValid(raw,stamp,sig,secret,now=Date.now()){if(!secret||!/^[0-9]{10}$/.test(stamp||'')||Math.abs(now/1000-Number(stamp))>120||!/^[a-f0-9]{64}$/.test(sig||''))return false;const h=crypto.createHmac('sha256',secret).update(stamp+'.').update(raw).digest();return crypto.timingSafeEqual(h,Buffer.from(sig,'hex'));}
+function createService(env,apiOverride,journal){
+ if(!env.FAUCETPAY_SEND_KEY||!env.FAUCETPAY_READ_KEY||!env.FAUCETPAY_BRIDGE_SECRET||env.FAUCETPAY_BRIDGE_SECRET.length<32)throw Error('Configure FaucetPay keys and bridge secret');
+ if(!env.FAUCETPAY_DB_PATH||!path.isAbsolute(env.FAUCETPAY_DB_PATH))throw Error('FAUCETPAY_DB_PATH must be absolute');
+ if(!journal&&env.FAUCETPAY_PERSISTENT_STORAGE_CONFIRMED!=='yes')throw Error('Confirm Discord-backed journal before enabling payouts');
+ fs.mkdirSync(path.dirname(env.FAUCETPAY_DB_PATH),{recursive:true,mode:0o700});
+ const db=new DatabaseSync(env.FAUCETPAY_DB_PATH);db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
+ CREATE TABLE IF NOT EXISTS jobs(key TEXT PRIMARY KEY,kind TEXT NOT NULL,fingerprint TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL,result TEXT,created INTEGER NOT NULL);
+ CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY,payload TEXT NOT NULL,created INTEGER NOT NULL);`);
+ const api=apiOverride||(async(endpoint,body={},send=false)=>{
+  let response;try{response=await fetch('https://faucetpay.io/api/v2'+endpoint,{method:'POST',headers:{'content-type':'application/json','authorization':'Bearer '+(send?env.FAUCETPAY_SEND_KEY:env.FAUCETPAY_READ_KEY)},body:JSON.stringify(body),signal:AbortSignal.timeout(25000),redirect:'error'});}catch{throw Error('provider_request_uncertain');}
+  let raw;try{raw=await response.text();if(raw.length>1024*1024)throw Error();}catch{throw Error('invalid_provider_response');}
+  let j;try{j=JSON.parse(raw);}catch{throw Error('invalid_provider_response');}
+  const ok=response.ok&&(j.success===true||j.status===200);const data=j.data&&typeof j.data==='object'?j.data:(j.status===200?Object.fromEntries(Object.entries(j).filter(([k])=>!['status','message'].includes(k))):null);if(!ok||!data||typeof data!=='object')throw Error(/^[a-z0-9_]{1,80}$/.test(String(j.code||''))?String(j.code):'provider_rejected');return data;
+ });
+ function record(k){const r=db.prepare('SELECT * FROM jobs WHERE key=?').get(k);return r?{...r,result:r.result?JSON.parse(r.result):null}:null;}
+ function save(k,r,s){db.prepare('UPDATE jobs SET result=?,state=? WHERE key=?').run(r==null?null:JSON.stringify(r),s,k);}
+ function restore(e){if(e.kind==='claim')db.prepare("INSERT OR IGNORE INTO jobs VALUES(?,?,?,?, 'SUBMITTING',NULL,?)").run(e.key,e.action,e.fingerprint,JSON.stringify(e.payload),e.created);else if(e.kind==='result'){if(!record(e.key))throw Error('journal_missing_claim');save(e.key,e.result,e.state);}else if(e.kind==='event')db.prepare('INSERT OR IGNORE INTO events VALUES(?,?,?)').run(e.digest,JSON.stringify(e.payload),e.created);else throw Error('invalid_journal_record');}
+ let tail=Promise.resolve();function serial(fn){const p=tail.then(fn);tail=p.catch(()=>{});return p;}
+ async function write(e){if(journal)await journal.append(e);restore(e);}
+ async function rate(p){const c=currency(p.currency||'LTC'),u=new URL('https://api.coingecko.com/api/v3/simple/price');u.searchParams.set('ids',CG[c]);u.searchParams.set('vs_currencies','usd');let prices;try{const r=await fetch(u,{signal:AbortSignal.timeout(15000),redirect:'error'});if(!r.ok)throw Error();prices=await r.json();}catch{throw Error('rate_unavailable');}const price=Number(prices?.[CG[c]]?.usd),usd=Number(env.FAUCETPAY_USD_PER_UNIT||1);if(!Number.isFinite(price)||price<=0||!Number.isFinite(usd)||usd<=0)throw Error('rate_unavailable');return {currency:c,precision:COINS[c],price_usd:String(price),min_sum_in:'0',usd_per_unit:String(usd)};}
+ async function quote(p){const c=currency(p.currency),to=String(p.address||'').trim(),n=units(String(p.amount),c);if(to.length<3||to.length>180||n<=0n||n>BigInt(Number.MAX_SAFE_INTEGER))throw Error('invalid_recipient_or_amount');const checked=await api('/check-address',{address:to,currency:c});if(!checked.payout_user_hash)throw Error('recipient_not_payable');const bal=await api('/balance',{currency:c}),available=bal.balance??bal.balance_smallest_unit;if(available==null||!/^\d+$/.test(String(available)))throw Error('balance_unavailable');if(BigInt(String(available))<n)throw Error('insufficient_provider_balance');return {currency:c,amount:String(p.amount),fee:'0',commission:'0',amount_units:n.toString(),recipient:to};}
+ async function rpc(p){if(!p||typeof p!=='object')throw Error('invalid_request');if(p.action==='rate')return rate(p);if(p.action==='quote')return quote(p);if(p.action==='job'){const j=record(p.key);return j?{state:j.state,result:j.result}:{state:'NOT_FOUND'};}
+  if(p.action==='payout'){if(!/^[a-z0-9-]{8,80}$/.test(p.key||''))throw Error('invalid_key');const payload={currency:currency(p.currency),amount:String(p.amount),address:String(p.address||'').trim()};await quote(payload);const fingerprint=JSON.stringify(payload),old=record(p.key);if(old){if(old.kind!=='payout'||old.fingerprint!==fingerprint)throw Error('idempotency_conflict');return {state:old.state,result:old.result};}await write({kind:'claim',key:p.key,action:'payout',fingerprint,payload,created:Date.now()});try{const sent=await api('/send',{idempotency_key:p.key,to:payload.address,amount:Number(units(payload.amount,payload.currency)),currency:payload.currency},true);if(!sent.payout_id)throw Error('missing_payout_id');const result={payout_id:String(sent.payout_id),currency:payload.currency,amount:payload.amount,to:payload.address,status:'sent'};await write({kind:'result',key:p.key,result,state:'DONE'});return {state:'DONE',result};}catch(e){if(e.message==='provider_rejected'){const failed={error:'provider_rejected'};await write({kind:'result',key:p.key,result:failed,state:'FAILED'});return {state:'FAILED',result:failed};}await write({kind:'result',key:p.key,result:null,state:'UNKNOWN'});throw Error('payout_outcome_uncertain');}}
+  throw Error('invalid_action');}
+ return {rpc:p=>serial(()=>rpc(p)),restore,db,api,
+  hasEvent:id=>!!db.prepare('SELECT 1 FROM events WHERE id=?').get(id),
+  recordEvent:p=>serial(async()=>{const id=String(p.id||'');if(!/^[A-Za-z0-9_-]{8,160}$/.test(id))throw Error('invalid_event_id');if(!['payout.failed','payout.sent'].includes(p.event))throw Error('invalid_event_type');if(!p.data||!p.data.payout_id)throw Error('invalid_event_data');const exists=!!db.prepare('SELECT 1 FROM events WHERE id=?').get(id);if(!exists)await write({kind:'event',digest:id,payload:p,created:Date.now()});return {duplicate:exists};})};
+}
+function install(app,{env,isReady,service,sendDiscord}){if(env.FAUCETPAY_ENABLED!=='true')return;const express=require('express'),svc=service||createService(env);
+ app.post('/webhooks/faucetpay',express.raw({type:'application/json',limit:'32kb'}),async(req,res)=>{
+  const secret=env.FAUCETPAY_WEBHOOK_SECRET||'',sig=req.get('x-faucetpay-signature')||'';
+  if(!secret||!Buffer.isBuffer(req.body)||! /^sha256=[a-f0-9]{64}$/.test(sig))return res.status(401).end();
+  const expected='sha256='+crypto.createHmac('sha256',secret).update(req.body).digest('hex');
+  if(!crypto.timingSafeEqual(Buffer.from(sig),Buffer.from(expected)))return res.status(401).end();
+  let event;try{event=JSON.parse(req.body.toString('utf8'));}catch{return res.status(400).end();}
+  const d=event&&event.data;
+  if(!event||!/^[A-Za-z0-9_-]{8,160}$/.test(String(event.id||''))||!['payout.failed','payout.sent'].includes(event.event)||!d||!/^[A-Za-z0-9_-]{1,160}$/.test(String(d.payout_id||''))||!/^[A-Z]{2,8}$/.test(String(d.currency||''))||typeof d.to!=='string'||d.to.length<1||d.to.length>180||!Number.isSafeInteger(Number(d.amount))||Number(d.amount)<=0)return res.status(400).end();
+  if(!isReady())return res.status(503).end();
+  try{await svc.recordEvent(event);if(event.event==='payout.failed'&&sendDiscord){const relay=Buffer.from(JSON.stringify({event_id:event.id,payout_id:String(d.payout_id),currency:String(d.currency),amount_units:String(d.amount),recipient:String(d.to)})).toString('base64url');await sendDiscord('FAUCETPAY_FAILED:'+relay);}return res.status(200).end();}catch{return res.status(503).end();}
+ });
+ app.post('/faucetpay/rpc',express.raw({type:'application/json',limit:'16kb'}),async(req,res)=>{if(!Buffer.isBuffer(req.body)||!authValid(req.body,req.get('x-tbot-time'),req.get('x-tbot-signature'),env.FAUCETPAY_BRIDGE_SECRET))return res.status(401).json({error:'unauthorized'});if(!isReady())return res.status(503).json({ok:false,error:'discord_recovering'});try{const payload=JSON.parse(req.body),data=await svc.rpc(payload);if(payload.action==='payout'&&data.state==='DONE'&&sendDiscord){try{await sendDiscord('FAUCETPAY:'+payload.key);}catch{}}res.json({ok:true,data});}catch(e){res.status(400).json({ok:false,error:/^[a-z0-9_]{1,100}$/.test(e.message)?e.message:'request_failed'});}});}
+module.exports={createService,install,authValid,units};
