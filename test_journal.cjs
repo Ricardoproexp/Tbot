@@ -22,7 +22,7 @@ test('Discord journal recovers FaucetPay payout receipt after cache loss without
 });
 test('uncertain FaucetPay payout remains UNKNOWN after cache rebuild and is not retried',async()=>{
  const ch=channel(),j=journal(ch),e=env();let sends=0;const api=mock(async()=>{sends++;throw Error('response lost');});
- const a=createService(e,api,j);await j.recover(a.restore);assert.equal((await a.rpc(req)).state,'UNKNOWN');a.db.close();
+ const a=createService(e,api,j);await j.recover(a.restore);await assert.rejects(()=>a.rpc(req),/payout_outcome_uncertain/);assert.equal((await a.rpc({action:'job',key:req.key})).state,'UNKNOWN');a.db.close();
  const j2=journal(ch),b=createService(env(),api,j2);await j2.recover(b.restore);assert.equal((await b.rpc(req)).state,'UNKNOWN');assert.equal(sends,1);b.db.close();
 });
 test('Discord journal write failure before payout claim prevents provider send',async()=>{
